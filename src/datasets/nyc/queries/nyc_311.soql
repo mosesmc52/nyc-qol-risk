@@ -1,0 +1,17 @@
+SELECT
+  `unique_key`,
+  `created_date`,
+  `closed_date`,
+  `agency`,
+  `agency_name`,
+  `complaint_type`,
+  `descriptor`,
+  `descriptor_2`,
+  `location_type`,
+  `status`,
+  `resolution_description`,
+  `latitude`,
+  `longitude`,
+  `location`
+WHERE `closed_date` IS NOT NULL
+ORDER BY `created_date` DESC NULL FIRST/page/column_manager
