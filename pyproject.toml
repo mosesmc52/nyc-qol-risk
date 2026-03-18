@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "municipal-stress-engine"
+version = "0.1.0"
+description = ""
+authors = ["Moses McCall <mosesmc52@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.13"
+python-dotenv = "^1.2.1"
+pytensor = "2.31.7"
+pymc = "^5.25.1"
+pandas = "^3.0.1"
+geopandas = "^1.1.2"
+
+
+[tool.poetry.group.dev.dependencies]
+jupyterlab = "^4.5.5"
+ipywidgets = "^8.1.8"
+keplergl = "^0.3.7"
+seaborn = "^0.13.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
