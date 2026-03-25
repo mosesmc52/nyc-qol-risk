@@ -14,4 +14,4 @@ SELECT
   `longitude`,
   `location`
 WHERE `closed_date` IS NOT NULL
-ORDER BY `created_date` DESC NULL FIRST/page/column_manager
+ORDER BY `created_date` DESC NULL FIRST

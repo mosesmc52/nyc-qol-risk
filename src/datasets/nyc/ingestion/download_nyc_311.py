@@ -14,16 +14,17 @@ Key features
 - Injects time filter into base SoQL safely before tail clauses
 
 Example (CLI):
-  python scripts/ingest/download_nyc_311_noise.py \
+  python src/datasets/nyc/ingestion/download_nyc_311.py \
     --start-date 2023-01-01 \
     --end-date 2024-01-01 \
+    --query-file ./src/datasets/nyc/queries/nyc_311.soql \
     --freq month \
     --resume
 
 Example (Python):
   dl = NYC311NoiseDownloader(
-      query_file="./queries/nyc_311_noise.soql",
-      out_dir="data/raw/nyc/311_noise",
+      query_file="./src/datasets/nyc/queries/nyc_311.soql",
+      out_dir="data/raw/nyc/311",
       freq="month",
       limit=2000,
       resume=True,
@@ -44,7 +45,7 @@ from typing import Iterator, Optional
 import pandas as pd
 import requests
 from dotenv import find_dotenv, load_dotenv
-from helpers import load_soql, request_with_retry
+from ingestion_utils import load_soql, request_with_retry
 
 # ---------------------------------------------------------------------
 # Constants
@@ -69,7 +70,7 @@ class Window:
     end: datetime  # exclusive
 
 
-class NYC311NoiseDownloader:
+class NYC311Downloader:
     """
     Downloader for NYC 311 noise complaints (Socrata SODA v2), partitioned by time windows.
 
@@ -83,8 +84,8 @@ class NYC311NoiseDownloader:
     def __init__(
         self,
         *,
-        query_file: str = "./queries/nyc_311_noise.soql",
-        out_dir: str = "data/raw/nyc/311_noise",
+        query_file: str = "./src/datasets/nyc/queries/nyc_311.soql",
+        out_dir: str = "data/raw/nyc/311",
         freq: str = "month",
         limit: int = 1000,
         resume: bool = False,
@@ -372,7 +373,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--query-file",
-        default="./queries/nyc_311_noise.soql",
+        default="./src/datasets/nyc/queries/nyc_311.soql",
         help="Path to SoQL file (no LIMIT/OFFSET needed)",
     )
     ap.add_argument("--out-dir", default=OUT_DIR, help="Base output directory")
@@ -403,7 +404,7 @@ def main() -> None:
 
     load_dotenv(find_dotenv())
 
-    dl = NYC311NoiseDownloader(
+    dl = NYC311Downloader(
         query_file=args.query_file,
         out_dir=args.out_dir,
         freq=args.freq,
