@@ -1,13 +1,9 @@
 import random
-import re
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import requests
-
-
-_SOCRATA_UI_SUFFIX_RE = re.compile(r"\s*/page/column_manager\b", flags=re.IGNORECASE)
 
 
 def load_soql(path: str) -> str:
@@ -16,7 +12,7 @@ def load_soql(path: str) -> str:
     """
     text = Path(path).read_text(encoding="utf-8")
     normalized = " ".join(line.strip() for line in text.splitlines() if line.strip())
-    return _SOCRATA_UI_SUFFIX_RE.sub("", normalized)
+    return normalized.removesuffix("/page/column_manager").strip()
 
 
 def request_with_retry(

@@ -1,0 +1,16 @@
+SELECT
+  `borough`,
+  `landuse`,
+  `longitude`,
+  `latitude`,
+  `block`,
+  `lot`,
+  `lotarea`,
+  `bldgarea`,
+  `resarea`,
+  `comarea`,
+  `unitsres`,
+  `unitstotal`,
+  `numbldgs`,
+  `yearbuilt`,
+  `builtfar`/page/column_manager
