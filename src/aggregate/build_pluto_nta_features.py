@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import sys
 from pathlib import Path
 
@@ -39,7 +40,26 @@ def load_pluto_data(path: str | Path) -> pd.DataFrame:
     suffix = data_path.suffix.lower()
     if suffix == ".parquet":
         return pd.read_parquet(data_path)
-    return pd.read_csv(data_path)
+
+    # Some downloaded PLUTO CSVs in this repo can contain trailing extra fields
+    # from schema changes. Parse row-by-row and keep only the named header columns.
+    with data_path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.reader(handle)
+        header = next(reader)
+        normalized_header = [column.strip() for column in header]
+
+        rows: list[dict[str, str | None]] = []
+        for row in reader:
+            if not row:
+                continue
+
+            record = {
+                column: row[idx] if idx < len(row) else None
+                for idx, column in enumerate(normalized_header)
+            }
+            rows.append(record)
+
+    return pd.DataFrame(rows, columns=normalized_header)
 
 
 def main() -> None:

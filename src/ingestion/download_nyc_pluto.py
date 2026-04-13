@@ -6,9 +6,7 @@ import argparse
 from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
-
-from nyc_open_data_api import NYCOpenDataAPI
-
+from src.ingestion.nyc_open_data_api import NYCOpenDataAPI
 
 BASE_URL = "https://data.cityofnewyork.us/resource/64uk-42ks.json"
 OUT_DIR = "./data/raw/nyc/pluto"
@@ -41,7 +39,7 @@ class NYCPlutoDownloader(NYCOpenDataAPI):
         )
 
     def default_output_path(self) -> Path:
-        return self.out_dir / "pluto.csv"
+        return self.out_dir / "nyc_pluto.csv"
 
 
 def main() -> None:
@@ -52,7 +50,9 @@ def main() -> None:
         help="Path to SoQL file (no LIMIT/OFFSET needed)",
     )
     ap.add_argument("--out-dir", default=OUT_DIR, help="Base output directory")
-    ap.add_argument("--out-file", default=None, help="Optional explicit CSV output path")
+    ap.add_argument(
+        "--out-file", default=None, help="Optional explicit CSV output path"
+    )
     ap.add_argument("--limit", type=int, default=1000, help="Pagination page size")
     ap.add_argument(
         "--max-retries", type=int, default=6, help="Max retries per request"

@@ -102,13 +102,13 @@ test = ["dateparser (==1.*)", "pre-commit", "pytest", "pytest-cov", "pytest-mock
 
 [[package]]
 name = "arviz"
-version = "0.23.4"
+version = "0.23.1"
 description = "Exploratory analysis of Bayesian models"
 optional = false
 python-versions = ">=3.10"
 files = [
-    {file = "arviz-0.23.4-py3-none-any.whl", hash = "sha256:c46c7faf8a06abadc9b5b64000584062ecbc20c2298e2bd6dfba04bb01a684ca"},
-    {file = "arviz-0.23.4.tar.gz", hash = "sha256:611be826995066036c9443ea98d11486c279ef3da3b6cdc5c0816fab434115b9"},
+    {file = "arviz-0.23.1-py3-none-any.whl", hash = "sha256:2b52c6327a158cbef9970647c8056e453c7e788e97a4446afb1f6a3ba2e0cbe0"},
+    {file = "arviz-0.23.1.tar.gz", hash = "sha256:2a91f4c84a85ef6b41d62fa337aa059a6c83ba10db4603e359a95981eb69c10d"},
 ]
 
 [package.dependencies]
@@ -118,7 +118,6 @@ matplotlib = ">=3.8"
 numpy = ">=1.26.0"
 packaging = "*"
 pandas = ">=2.1.0"
-platformdirs = "*"
 scipy = ">=1.11.0"
 setuptools = ">=60.0.0"
 typing_extensions = ">=4.1.0"
@@ -3950,4 +3949,4 @@ test = ["hypothesis", "packaging", "preliz (>=0.19)", "pytest", "pytest-cov", "s
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.12,<3.13"
-content-hash = "e34069e40e91b93e99907356df505733e678f6818b8816bfbc6d467727a10e24"
+content-hash = "b14cdd1cdd7b16d00cb0867b02ddbb1a42316617043d67bc73e50e7551e99692"

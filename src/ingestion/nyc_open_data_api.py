@@ -5,8 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 import requests
-
-from ingestion_utils import load_soql, request_with_retry
+from src.ingestion.ingestion_utils import load_soql, request_with_retry
 
 
 class NYCOpenDataAPI:
@@ -51,7 +50,9 @@ class NYCOpenDataAPI:
         out_path = Path(out_file)
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
-        query = base_soql.strip() if isinstance(base_soql, str) else self._load_base_soql()
+        query = (
+            base_soql.strip() if isinstance(base_soql, str) else self._load_base_soql()
+        )
         session = self._get_session()
 
         offset = 0

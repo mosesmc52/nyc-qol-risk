@@ -3,27 +3,89 @@ import pymc as pm
 import pytensor.tensor as pt
 
 
-def build_qol_risk_model(
-    y,  # shape: (N,) complaint counts
-    nta_idx,  # shape: (N,) maps obs -> NTA
-    week_idx,  # shape: (N,) maps obs -> week
-    cat_idx,  # shape: (N,) maps obs -> category
-    exposure,  # shape: (N,) population or housing-unit exposure
-    X_nta,  # shape: (n_nta, p) PLUTO features aggregated to NTA
+def build_reported_qol_pressure_model(
+    y,  # shape: (N,) observed counts
+    nta_idx,  # shape: (N,) obs -> NTA
+    week_idx,  # shape: (N,) obs -> week
+    cat_idx,  # shape: (N,) obs -> category
+    cat_group_idx,  # shape: (N,) obs -> category group (can equal cat_idx)
+    exposure,  # shape: (N,) positive offset
+    X_issue_nta,  # shape: (n_nta, p_issue)
+    X_reporting_nta,  # shape: (n_nta, p_reporting)
     n_nta,
     n_week,
     n_cat,
+    n_cat_group,
+    week_of_year=None,  # optional shape: (N,), values 1..52 (or 0..51)
     coords=None,
 ):
     """
-    Observation unit: one row per (NTA, week, category)
+    Hierarchical Negative Binomial model for reported 311 complaint pressure.
 
-    y: observed complaint counts
-    exposure: positive exposure for offset, same length as y
-    X_nta: NTA-level structural features (standardized)
+    Observation unit:
+        one row per (NTA, week, category)
+
+    Interpretation:
+        This models reported complaint intensity, not ground-truth QoL.
+        The linear predictor separates:
+          - issue-generating structural factors
+          - reporting-propensity structural factors
+          - baseline NTA / week / category effects
+          - local NTA x category-group dynamic deviations over time
+
+    Parameters
+    ----------
+    y : array-like, shape (N,)
+        Observed complaint counts.
+
+    nta_idx, week_idx, cat_idx, cat_group_idx : array-like, shape (N,)
+        Integer index arrays mapping each observation to its group.
+
+    exposure : array-like, shape (N,)
+        Positive exposure term used as a log offset.
+        Example: population, households, renter households, etc.
+
+    X_issue_nta : array-like, shape (n_nta, p_issue)
+        Standardized NTA-level features associated with actual issue generation.
+
+    X_reporting_nta : array-like, shape (n_nta, p_reporting)
+        Standardized NTA-level features associated with reporting propensity.
+
+    week_of_year : array-like, shape (N,), optional
+        Integer week-of-year values for seasonality. If provided, a simple
+        harmonic seasonal term is added.
+
+    Notes
+    -----
+    - A category-group dynamic state is included via AR(1):
+          local_state[nta, cat_group, week]
+      This is more flexible than one shared NTA-week latent state.
+    - If you do not yet have grouped categories, pass:
+          cat_group_idx = cat_idx
+          n_cat_group = n_cat
     """
 
-    p = X_nta.shape[1]
+    y = np.asarray(y)
+    nta_idx = np.asarray(nta_idx)
+    week_idx = np.asarray(week_idx)
+    cat_idx = np.asarray(cat_idx)
+    cat_group_idx = np.asarray(cat_group_idx)
+    exposure = np.asarray(exposure)
+
+    X_issue_nta = np.asarray(X_issue_nta)
+    X_reporting_nta = np.asarray(X_reporting_nta)
+
+    if np.any(exposure <= 0):
+        raise ValueError("All exposure values must be strictly positive.")
+
+    if X_issue_nta.shape[0] != n_nta:
+        raise ValueError("X_issue_nta must have shape (n_nta, p_issue).")
+
+    if X_reporting_nta.shape[0] != n_nta:
+        raise ValueError("X_reporting_nta must have shape (n_nta, p_reporting).")
+
+    p_issue = X_issue_nta.shape[1]
+    p_reporting = X_reporting_nta.shape[1]
 
     if coords is None:
         coords = {
@@ -31,73 +93,130 @@ def build_qol_risk_model(
             "nta": np.arange(n_nta),
             "week": np.arange(n_week),
             "category": np.arange(n_cat),
-            "feature": np.arange(p),
+            "category_group": np.arange(n_cat_group),
+            "issue_feature": np.arange(p_issue),
+            "reporting_feature": np.arange(p_reporting),
         }
 
     with pm.Model(coords=coords) as model:
-        # data
+        # ------------------------------------------------------------------
+        # Data containers
+        # ------------------------------------------------------------------
         y_data = pm.Data("y_data", y, dims="obs")
         nta_id = pm.Data("nta_id", nta_idx, dims="obs")
         week_id = pm.Data("week_id", week_idx, dims="obs")
         cat_id = pm.Data("cat_id", cat_idx, dims="obs")
+        cat_group_id = pm.Data("cat_group_id", cat_group_idx, dims="obs")
         expo = pm.Data("expo", exposure, dims="obs")
-        X = pm.Data("X", X_nta, dims=("nta", "feature"))
 
-        # global intercept
-        beta0 = pm.Normal("beta0", 0.0, 1.0)
-
-        # PLUTO coefficients
-        beta = pm.Normal("beta", 0.0, 0.5, dims="feature")
-
-        # NTA random intercept
-        sigma_nta = pm.Exponential("sigma_nta", 1.0)
-        alpha_nta = pm.Normal("alpha_nta", 0.0, sigma_nta, dims="nta")
-
-        # week effect
-        sigma_week = pm.Exponential("sigma_week", 1.0)
-        gamma_week = pm.Normal("gamma_week", 0.0, sigma_week, dims="week")
-
-        # category effect
-        sigma_cat = pm.Exponential("sigma_cat", 1.0)
-        delta_cat = pm.Normal("delta_cat", 0.0, sigma_cat, dims="category")
-
-        # latent dynamic QoL risk: NTA x week random walk
-        sigma_rw = pm.Exponential("sigma_rw", 2.0)
-
-        # innovations
-        eps = pm.Normal("eps", 0.0, sigma_rw, dims=("nta", "week"))
-
-        # cumulative sum over weeks = random walk
-        risk_rw = pm.Deterministic(
-            "risk_rw",
-            pt.cumsum(eps, axis=1),
-            dims=("nta", "week"),
+        X_issue = pm.Data("X_issue", X_issue_nta, dims=("nta", "issue_feature"))
+        X_reporting = pm.Data(
+            "X_reporting", X_reporting_nta, dims=("nta", "reporting_feature")
         )
 
-        # NTA structural component from PLUTO
-        structural = pm.Deterministic(
-            "structural",
-            X @ beta,
+        if week_of_year is not None:
+            week_of_year = np.asarray(week_of_year)
+            woy = pm.Data("week_of_year", week_of_year, dims="obs")
+            # convert to radians; handles 1..52 or 0..51 reasonably
+            theta = 2.0 * np.pi * (woy / 52.0)
+        else:
+            theta = None
+
+        # ------------------------------------------------------------------
+        # Global intercept
+        # ------------------------------------------------------------------
+        beta0 = pm.Normal("beta0", mu=0.0, sigma=1.0)
+
+        # ------------------------------------------------------------------
+        # Structural components
+        # ------------------------------------------------------------------
+        beta_issue = pm.Normal("beta_issue", mu=0.0, sigma=0.5, dims="issue_feature")
+        beta_reporting = pm.Normal(
+            "beta_reporting", mu=0.0, sigma=0.5, dims="reporting_feature"
+        )
+
+        issue_structural = pm.Deterministic(
+            "issue_structural",
+            X_issue @ beta_issue,
             dims="nta",
         )
 
-        # linear predictor
+        reporting_structural = pm.Deterministic(
+            "reporting_structural",
+            X_reporting @ beta_reporting,
+            dims="nta",
+        )
+
+        # ------------------------------------------------------------------
+        # Random intercepts
+        # ------------------------------------------------------------------
+        sigma_nta = pm.Exponential("sigma_nta", 1.0)
+        alpha_nta = pm.Normal("alpha_nta", mu=0.0, sigma=sigma_nta, dims="nta")
+
+        sigma_week = pm.Exponential("sigma_week", 1.0)
+        gamma_week = pm.Normal("gamma_week", mu=0.0, sigma=sigma_week, dims="week")
+
+        sigma_cat = pm.Exponential("sigma_cat", 1.0)
+        delta_cat = pm.Normal("delta_cat", mu=0.0, sigma=sigma_cat, dims="category")
+
+        # ------------------------------------------------------------------
+        # Optional global seasonality
+        # ------------------------------------------------------------------
+        if theta is not None:
+            beta_sin = pm.Normal("beta_sin", mu=0.0, sigma=0.5)
+            beta_cos = pm.Normal("beta_cos", mu=0.0, sigma=0.5)
+            seasonal_term = beta_sin * pt.sin(theta) + beta_cos * pt.cos(theta)
+        else:
+            seasonal_term = 0.0
+
+        # ------------------------------------------------------------------
+        # Local dynamic state: NTA x category-group x week
+        # AR(1) over the week axis
+        # ------------------------------------------------------------------
+        rho = pm.Uniform("rho", lower=-0.95, upper=0.95)
+        sigma_state = pm.Exponential("sigma_state", 2.0)
+
+        # Time axis should be the last axis for pm.AR
+        local_state = pm.AR(
+            "local_state",
+            rho=rho,
+            sigma=sigma_state,
+            init_dist=pm.Normal.dist(
+                mu=0.0,
+                sigma=sigma_state / pt.sqrt(1.0 - rho**2),
+            ),
+            ar_order=1,
+            dims=("nta", "category_group", "week"),
+        )
+
+        # ------------------------------------------------------------------
+        # Linear predictor
+        # ------------------------------------------------------------------
         eta = (
             beta0
             + pt.log(expo)
-            + structural[nta_id]
+            + issue_structural[nta_id]
+            + reporting_structural[nta_id]
             + alpha_nta[nta_id]
             + gamma_week[week_id]
             + delta_cat[cat_id]
-            + risk_rw[nta_id, week_id]
+            + local_state[nta_id, cat_group_id, week_id]
+            + seasonal_term
         )
 
         mu = pm.Deterministic("mu", pt.exp(eta), dims="obs")
 
-        # overdispersion
-        phi = pm.Exponential("phi", 1.0)
+        # ------------------------------------------------------------------
+        # Negative Binomial likelihood
+        # ------------------------------------------------------------------
+        alpha_nb = pm.Exponential("alpha_nb", 1.0)
 
-        # likelihood
-        pm.NegativeBinomial("y_like", mu=mu, alpha=phi, observed=y_data, dims="obs")
+        pm.NegativeBinomial(
+            "y_like",
+            mu=mu,
+            alpha=alpha_nb,
+            observed=y_data,
+            dims="obs",
+        )
 
     return model

@@ -10,9 +10,7 @@ from pathlib import Path
 from typing import Iterator
 
 from dotenv import find_dotenv, load_dotenv
-
-from nyc_open_data_api import NYCOpenDataAPI
-
+from src.ingestion.nyc_open_data_api import NYCOpenDataAPI
 
 BASE_URL = "https://data.cityofnewyork.us/resource/erm2-nwe9.json"
 OUT_DIR = "./data/raw/nyc/311_noise"
