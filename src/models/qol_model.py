@@ -6,31 +6,33 @@ import pytensor.tensor as pt
 def build_reported_qol_pressure_model(
     y,  # shape: (N,) observed counts
     nta_idx,  # shape: (N,) obs -> NTA
-    week_idx,  # shape: (N,) obs -> week
+    month_idx,  # shape: (N,) obs -> month
     cat_idx,  # shape: (N,) obs -> category
     cat_group_idx,  # shape: (N,) obs -> category group (can equal cat_idx)
     exposure,  # shape: (N,) positive offset
     X_issue_nta,  # shape: (n_nta, p_issue)
     X_reporting_nta,  # shape: (n_nta, p_reporting)
     n_nta,
-    n_week,
+    n_month,
     n_cat,
     n_cat_group,
-    week_of_year=None,  # optional shape: (N,), values 1..52 (or 0..51)
+    month_of_year=None,  # optional shape: (N,), values 1..12
     coords=None,
+    include_local_state=False,
+    include_reporting_structural=False,
 ):
     """
     Hierarchical Negative Binomial model for reported 311 complaint pressure.
 
     Observation unit:
-        one row per (NTA, week, category)
+        one row per (NTA, month, category)
 
     Interpretation:
         This models reported complaint intensity, not ground-truth QoL.
         The linear predictor separates:
           - issue-generating structural factors
           - reporting-propensity structural factors
-          - baseline NTA / week / category effects
+          - baseline NTA / month / category effects
           - local NTA x category-group dynamic deviations over time
 
     Parameters
@@ -38,7 +40,7 @@ def build_reported_qol_pressure_model(
     y : array-like, shape (N,)
         Observed complaint counts.
 
-    nta_idx, week_idx, cat_idx, cat_group_idx : array-like, shape (N,)
+    nta_idx, month_idx, cat_idx, cat_group_idx : array-like, shape (N,)
         Integer index arrays mapping each observation to its group.
 
     exposure : array-like, shape (N,)
@@ -51,15 +53,20 @@ def build_reported_qol_pressure_model(
     X_reporting_nta : array-like, shape (n_nta, p_reporting)
         Standardized NTA-level features associated with reporting propensity.
 
-    week_of_year : array-like, shape (N,), optional
-        Integer week-of-year values for seasonality. If provided, a simple
+    month_of_year : array-like, shape (N,), optional
+        Integer month-of-year values for seasonality. If provided, a simple
         harmonic seasonal term is added.
+    include_local_state : bool, default False
+        If True, include an AR(1) local state per (NTA, category_group, month).
+        This is more expressive but significantly heavier to sample.
+    include_reporting_structural : bool, default False
+        If True, include the reporting structural feature block.
 
     Notes
     -----
-    - A category-group dynamic state is included via AR(1):
-          local_state[nta, cat_group, week]
-      This is more flexible than one shared NTA-week latent state.
+    - A category-group dynamic state can be included via AR(1):
+          local_state[nta, cat_group, month]
+      This is more flexible than one shared NTA-month latent state.
     - If you do not yet have grouped categories, pass:
           cat_group_idx = cat_idx
           n_cat_group = n_cat
@@ -67,7 +74,7 @@ def build_reported_qol_pressure_model(
 
     y = np.asarray(y)
     nta_idx = np.asarray(nta_idx)
-    week_idx = np.asarray(week_idx)
+    month_idx = np.asarray(month_idx)
     cat_idx = np.asarray(cat_idx)
     cat_group_idx = np.asarray(cat_group_idx)
     exposure = np.asarray(exposure)
@@ -91,7 +98,7 @@ def build_reported_qol_pressure_model(
         coords = {
             "obs": np.arange(len(y)),
             "nta": np.arange(n_nta),
-            "week": np.arange(n_week),
+            "month": np.arange(n_month),
             "category": np.arange(n_cat),
             "category_group": np.arange(n_cat_group),
             "issue_feature": np.arange(p_issue),
@@ -104,7 +111,7 @@ def build_reported_qol_pressure_model(
         # ------------------------------------------------------------------
         y_data = pm.Data("y_data", y, dims="obs")
         nta_id = pm.Data("nta_id", nta_idx, dims="obs")
-        week_id = pm.Data("week_id", week_idx, dims="obs")
+        month_id = pm.Data("month_id", month_idx, dims="obs")
         cat_id = pm.Data("cat_id", cat_idx, dims="obs")
         cat_group_id = pm.Data("cat_group_id", cat_group_idx, dims="obs")
         expo = pm.Data("expo", exposure, dims="obs")
@@ -114,11 +121,11 @@ def build_reported_qol_pressure_model(
             "X_reporting", X_reporting_nta, dims=("nta", "reporting_feature")
         )
 
-        if week_of_year is not None:
-            week_of_year = np.asarray(week_of_year)
-            woy = pm.Data("week_of_year", week_of_year, dims="obs")
-            # convert to radians; handles 1..52 or 0..51 reasonably
-            theta = 2.0 * np.pi * (woy / 52.0)
+        if month_of_year is not None:
+            month_of_year = np.asarray(month_of_year)
+            moy = pm.Data("month_of_year", month_of_year, dims="obs")
+            # convert to radians for annual monthly seasonality
+            theta = 2.0 * np.pi * (moy / 12.0)
         else:
             theta = None
 
@@ -141,11 +148,15 @@ def build_reported_qol_pressure_model(
             dims="nta",
         )
 
-        reporting_structural = pm.Deterministic(
-            "reporting_structural",
-            X_reporting @ beta_reporting,
-            dims="nta",
-        )
+        if include_reporting_structural:
+            reporting_structural = pm.Deterministic(
+                "reporting_structural",
+                X_reporting @ beta_reporting,
+                dims="nta",
+            )
+            reporting_structural_term = reporting_structural[nta_id]
+        else:
+            reporting_structural_term = 0.0
 
         # ------------------------------------------------------------------
         # Random intercepts
@@ -153,8 +164,8 @@ def build_reported_qol_pressure_model(
         sigma_nta = pm.Exponential("sigma_nta", 1.0)
         alpha_nta = pm.Normal("alpha_nta", mu=0.0, sigma=sigma_nta, dims="nta")
 
-        sigma_week = pm.Exponential("sigma_week", 1.0)
-        gamma_week = pm.Normal("gamma_week", mu=0.0, sigma=sigma_week, dims="week")
+        sigma_month = pm.Exponential("sigma_month", 1.0)
+        gamma_month = pm.Normal("gamma_month", mu=0.0, sigma=sigma_month, dims="month")
 
         sigma_cat = pm.Exponential("sigma_cat", 1.0)
         delta_cat = pm.Normal("delta_cat", mu=0.0, sigma=sigma_cat, dims="category")
@@ -170,24 +181,28 @@ def build_reported_qol_pressure_model(
             seasonal_term = 0.0
 
         # ------------------------------------------------------------------
-        # Local dynamic state: NTA x category-group x week
-        # AR(1) over the week axis
+        # Optional local dynamic state: NTA x category-group x month
+        # AR(1) over the month axis
         # ------------------------------------------------------------------
-        rho = pm.Uniform("rho", lower=-0.95, upper=0.95)
-        sigma_state = pm.Exponential("sigma_state", 2.0)
+        if include_local_state:
+            rho = pm.Uniform("rho", lower=-0.95, upper=0.95)
+            sigma_state = pm.Exponential("sigma_state", 2.0)
 
-        # Time axis should be the last axis for pm.AR
-        local_state = pm.AR(
-            "local_state",
-            rho=rho,
-            sigma=sigma_state,
-            init_dist=pm.Normal.dist(
-                mu=0.0,
-                sigma=sigma_state / pt.sqrt(1.0 - rho**2),
-            ),
-            ar_order=1,
-            dims=("nta", "category_group", "week"),
-        )
+            # Time axis should be the last axis for pm.AR
+            local_state = pm.AR(
+                "local_state",
+                rho=rho,
+                sigma=sigma_state,
+                init_dist=pm.Normal.dist(
+                    mu=0.0,
+                    sigma=sigma_state / pt.sqrt(1.0 - rho**2),
+                ),
+                ar_order=1,
+                dims=("nta", "category_group", "month"),
+            )
+            local_state_term = local_state[nta_id, cat_group_id, month_id]
+        else:
+            local_state_term = 0.0
 
         # ------------------------------------------------------------------
         # Linear predictor
@@ -196,11 +211,11 @@ def build_reported_qol_pressure_model(
             beta0
             + pt.log(expo)
             + issue_structural[nta_id]
-            + reporting_structural[nta_id]
+            + reporting_structural_term
             + alpha_nta[nta_id]
-            + gamma_week[week_id]
+            + gamma_month[month_id]
             + delta_cat[cat_id]
-            + local_state[nta_id, cat_group_id, week_id]
+            + local_state_term
             + seasonal_term
         )
 

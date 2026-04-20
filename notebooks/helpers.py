@@ -2,7 +2,7 @@ import re
 import pandas as pd
 
 from pathlib import Path
-
+import arviz as az
 import geopandas as gpd
 import pandas as pd
 from src.aggregate.build_pluto_nta_features import load_pluto_data
@@ -12,6 +12,23 @@ from src.features.pluto_nta import (
     standardize_nta_geographies,
 )
 
+def export_idata(idata, out_path: str):
+    """
+    Save ArviZ InferenceData (PyMC sampling result) to netCDF.
+    """
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    az.to_netcdf(idata, out_path)
+    print(f"✅ Saved idata -> {out_path}")
+    return str(out_path)
+
+def load_idata(path: str):
+    """
+    Load ArviZ InferenceData from netCDF.
+    """
+    idata = az.from_netcdf(path)
+    print(f"✅ Loaded idata <- {path}")
+    return idata
 
 def prep_the_data(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
