@@ -224,12 +224,12 @@ def build_reported_qol_pressure_model(
         # ------------------------------------------------------------------
         # Negative Binomial likelihood
         # ------------------------------------------------------------------
-        alpha_nb = pm.Exponential("alpha_nb", 1.0)
+        alpha_nb_cat = pm.Exponential("alpha_nb_cat", 1.0, dims="category")
 
         pm.NegativeBinomial(
             "y_like",
             mu=mu,
-            alpha=alpha_nb,
+            alpha=alpha_nb_cat[cat_id],
             observed=y_data,
             dims="obs",
         )
